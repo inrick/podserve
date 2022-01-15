@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"text/template"
 
 	"github.com/bogem/id3v2"
@@ -32,6 +31,10 @@ func ck(err error) {
 // Possibly add optional channel elements, see
 // https://www.rssboard.org/rss-specification
 // for what is available.
+//
+// See also
+// https://podcasters.apple.com/support/823-podcast-requirements
+// https://help.apple.com/itc/podcasts_connect/#/itcb54353390
 const RSSTemplate = `
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/">
@@ -125,6 +128,16 @@ func logRequest(r *http.Request, verbose bool) {
 	}
 }
 
+// Citing Apple:
+//
+// The type values for the supported file formats are: audio/x-m4a, audio/mpeg,
+// video/quicktime, video/mp4, video/x-m4v, and application/pdf.
+var mimeType = map[string]string{
+	".mp3": "audio/mpeg",
+	".mp4": "audio/x-m4a",
+	".m4a": "audio/x-m4a",
+}
+
 func GetPodcastItems(linkPrefix, dir string) []PodcastItem {
 	assert(linkPrefix[len(linkPrefix)-1] == '/')
 	var pp []PodcastItem
@@ -136,8 +149,9 @@ func GetPodcastItems(linkPrefix, dir string) []PodcastItem {
 		if d.IsDir() {
 			return nil
 		}
-		// TODO: better media file check
-		if name := d.Name(); strings.HasSuffix(name, ".mp3") {
+		name := d.Name()
+		ext := filepath.Ext(name)
+		if mime, ok := mimeType[ext]; ok {
 			f, err := os.Open(filepath.Join(dir, path))
 			if err != nil {
 				return err
@@ -153,7 +167,7 @@ func GetPodcastItems(linkPrefix, dir string) []PodcastItem {
 			}
 			title := tag.Title()
 			if title == "" {
-				title = name[:len(name)-4]
+				title = name[:len(name)-len(ext)]
 			}
 			var desc string
 			for _, comment := range tag.GetFrames(tag.CommonID("Comments")) {
@@ -176,7 +190,7 @@ func GetPodcastItems(linkPrefix, dir string) []PodcastItem {
 				Enclosure: Enclosure{
 					Url:    url.String(),
 					Length: info.Size(),
-					Type:   "audio/mpeg",
+					Type:   mime,
 				},
 			})
 		}
