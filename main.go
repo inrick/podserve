@@ -1,7 +1,7 @@
 // A simple podcast server.
 //
-// It creates a podcast feed based on a folder given on the command line and
-// serves it on the path /pod. It supports mp3/m4a/mp4 files.
+// It creates and serves a podcast feed based on a folder given on the command
+// line. It supports mp3/m4a/mp4 files.
 //
 // References
 // [1] https://www.rssboard.org/rss-specification
@@ -13,8 +13,11 @@ package main // import "podserve"
 import (
 	"bytes"
 	"context"
+	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
+	"html/template"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -22,20 +25,29 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"strconv"
 	"syscall"
-	"text/template"
 	"time"
 )
 
-// See the references in the package comment for a description of supported
-// fields.
-const RSSTemplate = `
-<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+//go:embed cover.png
+var cover []byte
+
+const (
+	XMLHeader = `<?xml version="1.0" encoding="UTF-8"?>`
+	// See the references in the package comment for a description of supported
+	// fields.
+	RSSTemplate = `
+<rss version="2.0"
+ xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+ xmlns:content="http://purl.org/rss/1.0/modules/content/"
+>
 <channel>
  <title>{{.Title}}</title>
  <link>{{.Link}}/</link>
  <description>{{.Desc}}</description>
+ <language>{{.Language}}</language>
+ <itunes:image href="{{.CoverUrl}}" />
 
  {{range .Items}}
  <item>
@@ -48,11 +60,14 @@ const RSSTemplate = `
 </channel>
 </rss>
 `
+)
 
 type Podcast struct {
-	Title string
-	Link  string
-	Desc  string
+	Title    string
+	Link     string
+	Desc     string
+	Language string
+	CoverUrl string
 
 	Items []PodcastItem
 }
@@ -92,34 +107,48 @@ func main() {
 
 func run() error {
 	var port int
-	var dir string
-	var baseUrl string
+	var dir, externalUrl, title, desc, language string
 	flag.IntVar(&port, "port", 8080, "port on which to serve content")
-	flag.StringVar(&dir, "dir", ".", "directory to serve")
+	flag.StringVar(&dir, "dir", ".", "directory with media files to serve")
 	flag.StringVar(
-		&baseUrl,
-		"baseUrl",
-		"http://localhost:8080/",
-		"base url with which to prefix all podcast entries (should include protocol)",
+		&externalUrl,
+		"externalUrl",
+		"",
+		"external URL to prefix all podcast entries with "+
+			"(have to be externally reachable and include protocol)",
 	)
+	flag.StringVar(&title, "title", "My Podcast", "podcast title")
+	flag.StringVar(&desc, "desc", "Whatever", "podcast description")
+	flag.StringVar(
+		&language,
+		"lang", "en", "ISO-639 language code of the show's spoken language",
+	)
+	flag.BoolVar(&DebugLog, "debug", false, "enable debug log")
 	flag.Parse()
 
-	if baseUrl[len(baseUrl)-1] != '/' {
-		baseUrl += "/"
+	if externalUrl == "" {
+		return errors.New("-externalUrl have to be set (see -help)")
 	}
 
-	podItems, err := GetPodcastItems(baseUrl, dir)
+	if externalUrl[len(externalUrl)-1] != '/' {
+		externalUrl += "/"
+	}
+
+	podItems, err := GetPodcastItems(externalUrl, dir)
 	if err != nil {
 		return err
 	}
 	pod := Podcast{
-		Title: "My Podcast",
-		Link:  baseUrl,
-		Desc:  "Whatever",
-		Items: podItems,
+		Title:    title,
+		Link:     externalUrl,
+		Desc:     desc,
+		Language: "en",
+		CoverUrl: externalUrl + "cover.png",
+		Items:    podItems,
 	}
 	tmpl := template.Must(template.New("rss").Parse(RSSTemplate))
 	buf := bytes.NewBuffer(nil)
+	buf.Write([]byte(XMLHeader))
 	if err := tmpl.Execute(buf, pod); err != nil {
 		return err
 	}
@@ -136,12 +165,21 @@ func run() error {
 		}
 	}
 
+	feedPath := "/feed"
 	mux := http.NewServeMux()
 	mux.Handle("/", fs)
-	mux.HandleFunc("/pod", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(feedPath, func(w http.ResponseWriter, r *http.Request) {
 		defer LogResponse(w, r)
+		w.Header().Add("Content-Type", "application/rss+xml; charset=UTF-8")
+		w.Header().Add("Content-Length", strconv.Itoa(len(buf.Bytes())))
 		w.WriteHeader(http.StatusOK)
 		w.Write(buf.Bytes())
+	})
+	mux.HandleFunc("/cover.png", func(w http.ResponseWriter, r *http.Request) {
+		defer LogResponse(w, r)
+		w.Header().Add("Content-Type", "image/png")
+		w.Header().Add("Content-Length", strconv.Itoa(len(cover)))
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(cover))
 	})
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", port),
@@ -165,8 +203,8 @@ func run() error {
 	}()
 
 	Info("Finished initialization, serving %d files.", len(pod.Items))
-	Info("Add %spod to your podcast app.", baseUrl)
-	Info("Server is listening on port %d.", port)
+	Info("Add %s to your podcast app.", externalUrl+feedPath[1:])
+	Info("Listening on port %d.", port)
 	if err := s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
