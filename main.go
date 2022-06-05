@@ -14,11 +14,11 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"errors"
 	"flag"
 	"fmt"
 	"html/template"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -114,8 +114,9 @@ func run() error {
 		&externalUrl,
 		"externalUrl",
 		"",
-		"external URL to prefix all podcast entries with "+
-			"(have to be externally reachable and include protocol)",
+		"external URL to prefix all podcast entries with, "+
+			"have to include protocol (http/https) and "+
+			"should preferably be an externally reachable url",
 	)
 	flag.StringVar(&title, "title", "My Podcast", "podcast title")
 	flag.StringVar(&desc, "desc", "Whatever", "podcast description")
@@ -127,7 +128,9 @@ func run() error {
 	flag.Parse()
 
 	if externalUrl == "" {
-		return errors.New("-externalUrl have to be set (see -help)")
+		addrs := GetIpAddrs()
+		externalUrl = fmt.Sprintf("http://%s:%d/", addrs[0], port)
+		Warning("-externalUrl left unspecified, using %q", externalUrl)
 	}
 
 	if externalUrl[len(externalUrl)-1] != '/' {
@@ -222,6 +225,28 @@ var mimeType = map[string]string{
 	".mp3": "audio/mpeg",
 	".mp4": "audio/x-m4a",
 	".m4a": "audio/x-m4a",
+}
+
+func GetIpAddrs() []string {
+	var ips []string
+	host, err := os.Hostname()
+	if err != nil {
+		Error("Could not get hostname: %v", err)
+	}
+	addrs, err := net.LookupIP(host)
+	if err != nil {
+		Error("Could not lookup IP: %v", err)
+	}
+	for _, addr := range addrs {
+		if ip := addr.To4(); ip != nil {
+			ips = append(ips, ip.String())
+		}
+	}
+	if len(ips) == 0 {
+		Warning("Did not find an IP address on any interface.")
+		ips = append(ips, "127.0.0.1")
+	}
+	return ips
 }
 
 func GetPodcastItems(linkPrefix, dir string) ([]PodcastItem, error) {

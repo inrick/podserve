@@ -10,7 +10,8 @@ example. No metadata tags are read. It supports mp3/m4a/mp4 files.
 Usage
 -----
 
-Run `podserve` with at least the following flags specified:
+Run `./podserve -help` for all available flags. To get started, run `podserve`
+with at least the following flags specified:
 
 ```
 ./podserve \
@@ -22,4 +23,6 @@ Run `podserve` with at least the following flags specified:
 
 and then point your podcast app to `<external url>/feed`.
 
-See `./podserve -help` for other flags.
+Depending on your podcast application, it might not be necessary to use an
+externally reachable URL. I had success accessing a podcast on the local
+network using Apple Podcasts, but not using Overcast.

@@ -85,6 +85,10 @@ func Info(format string, args ...interface{}) {
 	logf("INFO", format, args...)
 }
 
+func Warning(format string, args ...interface{}) {
+	logf("WARNING", format, args...)
+}
+
 func Error(format string, args ...interface{}) {
 	logf("ERROR", format, args...)
 }
