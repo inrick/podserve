@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
-	"reflect"
 	"time"
 )
 
@@ -12,6 +11,28 @@ var DebugLog bool
 
 func init() {
 	log.SetFlags(0)
+}
+
+type ResponseWriter struct {
+	w      http.ResponseWriter
+	status int
+}
+
+func NewResponseWriter(w http.ResponseWriter) *ResponseWriter {
+	return &ResponseWriter{w: w, status: 200}
+}
+
+func (w *ResponseWriter) Header() http.Header {
+	return w.w.Header()
+}
+
+func (w *ResponseWriter) Write(buf []byte) (int, error) {
+	return w.w.Write(buf)
+}
+
+func (w *ResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.w.WriteHeader(status)
 }
 
 type ResponseLog struct {
@@ -24,10 +45,7 @@ type ResponseLog struct {
 	ContentLength string
 }
 
-func extractResponseLog(w http.ResponseWriter, r *http.Request) ResponseLog {
-	// This is unsafe but it's the easiest way to access the return status. Seems
-	// silly that it's private anyway and unlikely to change.
-	status := int(reflect.ValueOf(w).Elem().FieldByName("status").Int())
+func extractResponseLog(w *ResponseWriter, r *http.Request) ResponseLog {
 	uri := r.RequestURI
 	if uri == "" {
 		uri = r.URL.RequestURI()
@@ -46,12 +64,12 @@ func extractResponseLog(w http.ResponseWriter, r *http.Request) ResponseLog {
 		Method:        r.Method,
 		Path:          uri,
 		Proto:         r.Proto,
-		Status:        status,
+		Status:        w.status,
 		ContentLength: contentLength,
 	}
 }
 
-func LogResponse(w http.ResponseWriter, r *http.Request) {
+func LogResponse(w *ResponseWriter, r *http.Request) {
 	rl := extractResponseLog(w, r)
 	Info(
 		"%s %s \"%s %s %s\" %d %s",

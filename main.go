@@ -172,14 +172,16 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/", fs)
 	mux.HandleFunc(feedPath, func(w http.ResponseWriter, r *http.Request) {
-		defer LogResponse(w, r)
+		w = NewResponseWriter(w)
+		defer LogResponse(w.(*ResponseWriter), r)
 		w.Header().Add("Content-Type", "application/rss+xml; charset=UTF-8")
 		w.Header().Add("Content-Length", strconv.Itoa(len(buf.Bytes())))
 		w.WriteHeader(http.StatusOK)
 		w.Write(buf.Bytes())
 	})
 	mux.HandleFunc("/cover.png", func(w http.ResponseWriter, r *http.Request) {
-		defer LogResponse(w, r)
+		w = NewResponseWriter(w)
+		defer LogResponse(w.(*ResponseWriter), r)
 		w.Header().Add("Content-Type", "image/png")
 		w.Header().Add("Content-Length", strconv.Itoa(len(cover)))
 		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(cover))
@@ -299,7 +301,8 @@ func GetPodcastItems(linkPrefix, dir string) ([]PodcastItem, error) {
 }
 
 func (s PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	defer LogResponse(w, r)
+	w = NewResponseWriter(w)
+	defer LogResponse(w.(*ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
