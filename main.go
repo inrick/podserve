@@ -43,11 +43,11 @@ const (
  xmlns:content="http://purl.org/rss/1.0/modules/content/"
 >
 <channel>
- <title>{{.Title}}</title>
- <link>{{.Link}}/</link>
- <description>{{.Desc}}</description>
- <language>{{.Language}}</language>
- <itunes:image href="{{.CoverUrl}}" />
+ <title>{{.Meta.Title}}</title>
+ <link>{{.Meta.Link}}/</link>
+ <description>{{.Meta.Desc}}</description>
+ <language>{{.Meta.Language}}</language>
+ <itunes:image href="{{.Meta.CoverUrl}}" />
 
  {{range .Items}}
  <item>
@@ -62,20 +62,22 @@ const (
 `
 )
 
-type Podcast struct {
+type PodcastTemplateData struct {
+	Meta  PodcastDesc
+	Items []PodcastItem
+}
+
+type PodcastDesc struct {
 	Title    string
 	Link     string
 	Desc     string
 	Language string
 	CoverUrl string
 
-	Items []PodcastItem
-}
-
-type Enclosure struct {
-	Url    string
-	Length int64
-	Type   string
+	externalUrl    string
+	feedServePath  string
+	coverServePath string
+	localFileDir   string
 }
 
 type PodcastItem struct {
@@ -87,15 +89,23 @@ type PodcastItem struct {
 	Enclosure Enclosure
 }
 
+type Enclosure struct {
+	Url    string
+	Length int64
+	Type   string
+}
+
+type PodcastServer struct {
+	Desc     PodcastDesc
+	RootPath string
+	FeedXML  []byte
+	Files    map[string]PodcastFile // Path -> PodcastFile, if it exists.
+}
+
 type PodcastFile struct {
 	MimeType string
 	Size     int64
 	ModTime  time.Time
-}
-
-type PodcastServer struct {
-	RootPath string
-	Files    map[string]PodcastFile // Path -> PodcastFile, if it exists.
 }
 
 func main() {
@@ -137,55 +147,28 @@ func run() error {
 		externalUrl += "/"
 	}
 
-	podItems, err := GetPodcastItems(externalUrl, dir)
-	if err != nil {
-		return err
-	}
-	pod := Podcast{
+	podDesc := PodcastDesc{
 		Title:    title,
 		Link:     externalUrl,
 		Desc:     desc,
 		Language: "en",
 		CoverUrl: externalUrl + "cover.png",
-		Items:    podItems,
+
+		externalUrl:    externalUrl,
+		coverServePath: "/cover.png",
+		feedServePath:  "/feed",
+		localFileDir:   dir,
 	}
-	tmpl := template.Must(template.New("rss").Parse(RSSTemplate))
-	buf := bytes.NewBuffer(nil)
-	buf.Write([]byte(XMLHeader))
-	if err := tmpl.Execute(buf, pod); err != nil {
+
+	srv, err := NewPodcastServer(podDesc)
+	if err != nil {
 		return err
 	}
 
-	fs := PodcastServer{
-		RootPath: dir,
-		Files:    make(map[string]PodcastFile),
-	}
-	for _, it := range pod.Items {
-		fs.Files[it.Path] = PodcastFile{
-			MimeType: it.Enclosure.Type,
-			Size:     it.Enclosure.Length,
-			ModTime:  it.ModTime,
-		}
-	}
-
-	feedPath := "/feed"
 	mux := http.NewServeMux()
-	mux.Handle("/", fs)
-	mux.HandleFunc(feedPath, func(w http.ResponseWriter, r *http.Request) {
-		w = NewResponseWriter(w)
-		defer LogResponse(w.(*ResponseWriter), r)
-		w.Header().Add("Content-Type", "application/rss+xml; charset=UTF-8")
-		w.Header().Add("Content-Length", strconv.Itoa(len(buf.Bytes())))
-		w.WriteHeader(http.StatusOK)
-		w.Write(buf.Bytes())
-	})
-	mux.HandleFunc("/cover.png", func(w http.ResponseWriter, r *http.Request) {
-		w = NewResponseWriter(w)
-		defer LogResponse(w.(*ResponseWriter), r)
-		w.Header().Add("Content-Type", "image/png")
-		w.Header().Add("Content-Length", strconv.Itoa(len(cover)))
-		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(cover))
-	})
+	mux.Handle("/", srv)
+	mux.HandleFunc(srv.Desc.feedServePath, srv.ServeFeed)
+	mux.HandleFunc(srv.Desc.coverServePath, srv.ServeCover)
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", port),
 		Handler:        mux,
@@ -207,8 +190,8 @@ func run() error {
 		close(shutdown)
 	}()
 
-	Info("Finished initialization, serving %d files.", len(pod.Items))
-	Info("Add %s to your podcast app.", externalUrl+feedPath[1:])
+	Info("Finished initialization, serving %d files.", len(srv.Files))
+	Info("Add %s to your podcast app.", externalUrl+srv.Desc.feedServePath[1:])
 	Info("Listening on port %d.", port)
 	if err := s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
@@ -251,12 +234,41 @@ func GetIpAddrs() []string {
 	return ips
 }
 
-func GetPodcastItems(linkPrefix, dir string) ([]PodcastItem, error) {
-	if linkPrefix[len(linkPrefix)-1] != '/' {
-		panic("GetPodcastItems: expected linkPrefix to end in '/'")
+func NewPodcastServer(desc PodcastDesc) (*PodcastServer, error) {
+	podItems, err := desc.PodcastItems()
+	if err != nil {
+		return nil, err
+	}
+	files := make(map[string]PodcastFile)
+	for _, it := range podItems {
+		files[it.Path] = PodcastFile{
+			MimeType: it.Enclosure.Type,
+			Size:     it.Enclosure.Length,
+			ModTime:  it.ModTime,
+		}
+	}
+	feedXml, err := desc.Feed(podItems)
+	if err != nil {
+		return nil, err
+	}
+
+	srv := PodcastServer{
+		Desc:     desc,
+		RootPath: desc.localFileDir,
+		FeedXML:  feedXml,
+		Files:    files,
+	}
+	return &srv, nil
+}
+
+// Reads the local file system and returns a slice of available PodcastItems
+// with all the metadata required to serve them.
+func (desc PodcastDesc) PodcastItems() ([]PodcastItem, error) {
+	if desc.externalUrl[len(desc.externalUrl)-1] != '/' {
+		panic("PodcastItems: expected externalUrl to end in '/'")
 	}
 	var pp []PodcastItem
-	fsys := os.DirFS(dir)
+	fsys := os.DirFS(desc.localFileDir)
 	err := fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -268,7 +280,7 @@ func GetPodcastItems(linkPrefix, dir string) ([]PodcastItem, error) {
 		ext := filepath.Ext(name)
 
 		if mime, ok := mimeType[ext]; ok {
-			f, err := os.Open(filepath.Join(dir, path))
+			f, err := os.Open(filepath.Join(desc.localFileDir, path))
 			if err != nil {
 				return err
 			}
@@ -278,7 +290,7 @@ func GetPodcastItems(linkPrefix, dir string) ([]PodcastItem, error) {
 			if err != nil {
 				return err
 			}
-			url, err := url.Parse(linkPrefix + url.PathEscape(path))
+			url, err := url.Parse(desc.externalUrl + url.PathEscape(path))
 			if err != nil {
 				return err
 			}
@@ -300,7 +312,15 @@ func GetPodcastItems(linkPrefix, dir string) ([]PodcastItem, error) {
 	return pp, err
 }
 
-func (s PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (desc PodcastDesc) Feed(items []PodcastItem) ([]byte, error) {
+	tmpl := template.Must(template.New("rss").Parse(RSSTemplate))
+	buf := bytes.NewBuffer(nil)
+	buf.Write([]byte(XMLHeader))
+	err := tmpl.Execute(buf, PodcastTemplateData{desc, items})
+	return buf.Bytes(), err
+}
+
+func (s *PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w = NewResponseWriter(w)
 	defer LogResponse(w.(*ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
@@ -329,4 +349,21 @@ func (s PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ourselves though. On the other hand we have a file handle at this point,
 	// it should work mostly alright.
 	http.ServeContent(w, r, "", pf.ModTime, fp)
+}
+
+func (s *PodcastServer) ServeFeed(w http.ResponseWriter, r *http.Request) {
+	w = NewResponseWriter(w)
+	defer LogResponse(w.(*ResponseWriter), r)
+	w.Header().Add("Content-Type", "application/rss+xml; charset=UTF-8")
+	w.Header().Add("Content-Length", strconv.Itoa(len(s.FeedXML)))
+	w.WriteHeader(http.StatusOK)
+	w.Write(s.FeedXML)
+}
+
+func (s *PodcastServer) ServeCover(w http.ResponseWriter, r *http.Request) {
+	w = NewResponseWriter(w)
+	defer LogResponse(w.(*ResponseWriter), r)
+	w.Header().Add("Content-Type", "image/png")
+	w.Header().Add("Content-Length", strconv.Itoa(len(cover)))
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(cover))
 }
