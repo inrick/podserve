@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"time"
 )
 
@@ -11,6 +14,7 @@ var DebugLog bool
 
 func init() {
 	log.SetFlags(0)
+	log.SetOutput(os.Stdout)
 }
 
 type ResponseWriter struct {
@@ -90,9 +94,24 @@ func LogResponse(w *ResponseWriter, r *http.Request) {
 	}
 }
 
+type LogMessage struct {
+	Level string `json:"level"`
+	Time  string `json:"time"`
+	Msg   string `json:"msg"`
+}
+
 func logf(level, format string, args ...interface{}) {
-	t := time.Now().Format("[2006-01-02 15:04:05]")
-	log.Printf(t+" ["+level+"] "+format, args...)
+	t := time.Now().Format("2006-01-02 15:04:05")
+	msg := LogMessage{
+		Level: level,
+		Time:  t,
+		Msg:   fmt.Sprintf(format, args...),
+	}
+	bb, err := json.Marshal(&msg)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf(string(bb))
 }
 
 func Debug(format string, args ...interface{}) {
