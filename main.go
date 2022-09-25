@@ -28,6 +28,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"podserve/log"
 )
 
 //go:embed cover.png
@@ -110,7 +112,7 @@ type PodcastFile struct {
 
 func main() {
 	if err := run(); err != nil {
-		Error("%v", err)
+		log.Error("%v", err)
 		os.Exit(1)
 	}
 }
@@ -134,13 +136,12 @@ func run() error {
 		&language,
 		"lang", "en", "ISO-639 language code of the show's spoken language",
 	)
-	flag.BoolVar(&DebugLog, "debug", false, "enable debug log")
 	flag.Parse()
 
 	if externalUrl == "" {
 		addrs := GetIpAddrs()
 		externalUrl = fmt.Sprintf("http://%s:%d/", addrs[0], port)
-		Warning("-externalUrl left unspecified, using %q", externalUrl)
+		log.Warning("-externalUrl left unspecified, using %q", externalUrl)
 	}
 
 	if externalUrl[len(externalUrl)-1] != '/' {
@@ -190,15 +191,15 @@ func run() error {
 		<-sig
 		cancel()
 		if err := s.Shutdown(context.Background()); err != nil {
-			Error("%v", err)
+			log.Error("%v", err)
 		}
 		<-done
 		close(shutdown)
 	}()
 
-	Info("Finished initialization, serving %d files.", len(srv.Files))
-	Info("Add %s to your podcast app.", externalUrl+srv.Desc.feedServePath[1:])
-	Info("Listening on port %d.", port)
+	log.Info("Finished initialization, serving %d files.", len(srv.Files))
+	log.Info("Add %s to your podcast app.", externalUrl+srv.Desc.feedServePath[1:])
+	log.Info("Listening on port %d.", port)
 	if err := s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
@@ -222,11 +223,11 @@ func GetIpAddrs() []string {
 	var ips []string
 	host, err := os.Hostname()
 	if err != nil {
-		Error("Could not get hostname: %v", err)
+		log.Error("Could not get hostname: %v", err)
 	}
 	addrs, err := net.LookupIP(host)
 	if err != nil {
-		Error("Could not lookup IP: %v", err)
+		log.Error("Could not lookup IP: %v", err)
 	}
 	for _, addr := range addrs {
 		if ip := addr.To4(); ip != nil {
@@ -234,7 +235,7 @@ func GetIpAddrs() []string {
 		}
 	}
 	if len(ips) == 0 {
-		Warning("Did not find an IP address on any interface.")
+		log.Warning("Did not find an IP address on any interface.")
 		ips = append(ips, "127.0.0.1")
 	}
 	return ips
@@ -265,7 +266,7 @@ func refreshPodcastEntries(ctx context.Context, done chan<- struct{}, s *Podcast
 
 		feedXml, files, err := s.Desc.GenerateFeed()
 		if err != nil {
-			Error("refreshPodcastServer: could not generate podcast items: %v", err)
+			log.Error("refreshPodcastServer: could not generate podcast items: %v", err)
 			continue
 		}
 
@@ -276,7 +277,7 @@ func refreshPodcastEntries(ctx context.Context, done chan<- struct{}, s *Podcast
 		s.mu.Lock()
 		s.FeedXML = feedXml
 		s.Files = files
-		Info("Updated podcast, now serving %d files.", len(s.Files))
+		log.Info("Updated podcast, now serving %d files.", len(s.Files))
 		s.mu.Unlock()
 	}
 }
@@ -362,8 +363,8 @@ func (desc PodcastDesc) feed(items []PodcastItem) ([]byte, error) {
 }
 
 func (s *PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w = NewResponseWriter(w)
-	defer LogResponse(w.(*ResponseWriter), r)
+	w = log.NewResponseWriter(w)
+	defer log.LogResponse(w.(*log.ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -381,7 +382,7 @@ func (s *PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fp, err := os.Open(pf.Path)
 	if err != nil {
-		Error("could not open file %q: %v", requestedFile, err)
+		log.Error("could not open file %q: %v", requestedFile, err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -396,8 +397,8 @@ func (s *PodcastServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *PodcastServer) ServeFeed(w http.ResponseWriter, r *http.Request) {
-	w = NewResponseWriter(w)
-	defer LogResponse(w.(*ResponseWriter), r)
+	w = log.NewResponseWriter(w)
+	defer log.LogResponse(w.(*log.ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -412,8 +413,8 @@ func (s *PodcastServer) ServeFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *PodcastServer) ServeCover(w http.ResponseWriter, r *http.Request) {
-	w = NewResponseWriter(w)
-	defer LogResponse(w.(*ResponseWriter), r)
+	w = log.NewResponseWriter(w)
+	defer log.LogResponse(w.(*log.ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		w.WriteHeader(http.StatusBadRequest)
 		return

@@ -1,16 +1,13 @@
-package main
+package log // import "podserve/log"
 
 import (
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"time"
 )
-
-var DebugLog bool
 
 func init() {
 	log.SetFlags(0)
@@ -39,17 +36,17 @@ func (w *ResponseWriter) WriteHeader(status int) {
 	w.w.WriteHeader(status)
 }
 
-type ResponseLog struct {
-	RemoteAddr    string
-	XForwardedFor string
-	Method        string
-	Path          string
-	Proto         string
-	Status        int
-	ContentLength string
+type responseLog struct {
+	RemoteAddr    string `json:"remote_addr"`
+	XForwardedFor string `json:"x_forwarded_for"`
+	Method        string `json:"method"`
+	Path          string `json:"path"`
+	Proto         string `json:"proto"`
+	Status        int    `json:"status"`
+	ContentLength string `json:"content_length"`
 }
 
-func extractResponseLog(w *ResponseWriter, r *http.Request) ResponseLog {
+func extractResponseLog(w *ResponseWriter, r *http.Request) responseLog {
 	uri := r.RequestURI
 	if uri == "" {
 		uri = r.URL.RequestURI()
@@ -62,7 +59,7 @@ func extractResponseLog(w *ResponseWriter, r *http.Request) ResponseLog {
 	if xForwardedFor == "" {
 		xForwardedFor = "-"
 	}
-	return ResponseLog{
+	return responseLog{
 		RemoteAddr:    r.RemoteAddr,
 		XForwardedFor: xForwardedFor,
 		Method:        r.Method,
@@ -74,35 +71,30 @@ func extractResponseLog(w *ResponseWriter, r *http.Request) ResponseLog {
 }
 
 func LogResponse(w *ResponseWriter, r *http.Request) {
-	rl := extractResponseLog(w, r)
-	Info(
-		"%s %s \"%s %s %s\" %d %s",
-		rl.RemoteAddr,
-		rl.XForwardedFor,
-		rl.Method,
-		rl.Path,
-		rl.Proto,
-		rl.Status,
-		rl.ContentLength,
-	)
-	if DebugLog {
-		buf, err := httputil.DumpRequest(r, false)
-		if err != nil {
-			return
-		}
-		Debug(string(buf))
+	t := time.Now().Format(time.RFC3339)
+	msg := struct {
+		logMessage
+		responseLog
+	}{
+		logMessage{Level: "INFO", Time: t, Msg: "Sent response"},
+		extractResponseLog(w, r),
 	}
+	bb, err := json.Marshal(&msg)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf(string(bb))
 }
 
-type LogMessage struct {
+type logMessage struct {
 	Level string `json:"level"`
 	Time  string `json:"time"`
 	Msg   string `json:"msg"`
 }
 
 func logf(level, format string, args ...interface{}) {
-	t := time.Now().Format("2006-01-02 15:04:05")
-	msg := LogMessage{
+	t := time.Now().Format(time.RFC3339)
+	msg := logMessage{
 		Level: level,
 		Time:  t,
 		Msg:   fmt.Sprintf(format, args...),
