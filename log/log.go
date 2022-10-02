@@ -83,7 +83,7 @@ func LogResponse(w *ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf(string(bb))
+	log.Print(string(bb))
 }
 
 type logMessage struct {
@@ -103,7 +103,7 @@ func logf(level, format string, args ...interface{}) {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf(string(bb))
+	log.Print(string(bb))
 }
 
 func Debug(format string, args ...interface{}) {
