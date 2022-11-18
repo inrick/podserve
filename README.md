@@ -23,6 +23,9 @@ with at least the following flags specified:
 
 and then point your podcast app to `<external url>/feed`.
 
+It will reread the media file directory once every minute looking for new
+files.
+
 Depending on your podcast application, it might not be necessary to use an
 externally reachable URL. I had success accessing a podcast on the local
 network using Apple Podcasts, but not using Overcast.
