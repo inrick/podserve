@@ -48,9 +48,17 @@ func init() {
 	slog.SetDefault(logger)
 }
 
+// Different tags used to group log messages.
+const (
+	TagService = "service"
+	TagHttp    = "http"
+	TagStart   = "start"
+	TagRefresh = "refresh"
+)
+
 func main() {
 	if err := run(); err != nil {
-		slog.Error("main", err)
+		slog.Error("main", err, "tag", TagService)
 		os.Exit(1)
 	}
 }
@@ -79,7 +87,11 @@ func run() error {
 	if externalUrl == "" {
 		addrs := GetIpAddrs()
 		externalUrl = fmt.Sprintf("http://%s:%d/", addrs[0], port)
-		slog.Warn(fmt.Sprintf("-externalUrl left unspecified, using %s", externalUrl), "url", externalUrl)
+		slog.Warn(
+			fmt.Sprintf("-externalUrl left unspecified, using %s", externalUrl),
+			"tag", TagStart,
+			"url", externalUrl,
+		)
 	}
 
 	if externalUrl[len(externalUrl)-1] != '/' {
@@ -125,16 +137,18 @@ func run() error {
 		<-sig
 		cancel()
 		if err := s.Shutdown(context.Background()); err != nil {
-			slog.Error("error shutting down http server", err)
+			slog.Error("error shutting down http server", err, "tag", TagService)
 		}
 		<-done
 		close(shutdown)
 	}()
 
 	fullUrl := externalUrl + FeedPath[1:]
-	slog.Info(fmt.Sprintf("Finished initialization, serving %d files.", len(srv.Files)), "num_files", len(srv.Files))
-	slog.Info(fmt.Sprintf("Add %s to your podcast app.", fullUrl), "url", fullUrl)
-	slog.Info(fmt.Sprintf("Listening on port %d", port), "port", port)
+	initMsg := fmt.Sprintf(
+		"Finished initialization, serving %d files. Add %s to your podcast app. Listening on port %d.",
+		len(srv.Files), fullUrl, port,
+	)
+	slog.Info(initMsg, "tag", TagStart, "num_files", len(srv.Files), "url", fullUrl, "port", port)
 	if err := s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
@@ -146,11 +160,11 @@ func GetIpAddrs() []string {
 	var ips []string
 	host, err := os.Hostname()
 	if err != nil {
-		slog.Error("Could not get hostname", err)
+		slog.Error("Could not get hostname", err, "tag", TagService)
 	}
 	addrs, err := net.LookupIP(host)
 	if err != nil {
-		slog.Error("Could not lookup IP", err)
+		slog.Error("Could not lookup IP", err, "tag", TagService)
 	}
 	for _, addr := range addrs {
 		if ip := addr.To4(); ip != nil {
@@ -158,7 +172,7 @@ func GetIpAddrs() []string {
 		}
 	}
 	if len(ips) == 0 {
-		slog.Warn("Did not find an IP address on any interface.")
+		slog.Warn("Did not find an IP address on any interface.", "tag", TagService)
 		ips = append(ips, "127.0.0.1")
 	}
 	return ips
@@ -189,7 +203,7 @@ func refreshEntries(ctx context.Context, done chan<- struct{}, s *Server) {
 
 		feedXml, files, err := s.Meta.GenerateFeed()
 		if err != nil {
-			slog.Error("refreshEntries: could not generate podcast items", err)
+			slog.Error("refreshEntries: could not generate podcast items", err, "tag", TagRefresh)
 			continue
 		}
 
@@ -200,7 +214,11 @@ func refreshEntries(ctx context.Context, done chan<- struct{}, s *Server) {
 		s.mu.Lock()
 		s.FeedXML = feedXml
 		s.Files = files
-		slog.Info(fmt.Sprintf("Updated podcast, now serving %d files.", len(s.Files)), "num_files", len(s.Files))
+		slog.Info(
+			fmt.Sprintf("Updated podcast, now serving %d files.", len(s.Files)),
+			"tag", TagRefresh,
+			"num_files", len(s.Files),
+		)
 		s.mu.Unlock()
 	}
 }
@@ -225,7 +243,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fp, err := os.Open(pf.Path)
 	if err != nil {
-		slog.Error("could not open file", err, "file", requestedFile)
+		slog.Error("could not open file", err, "file", requestedFile, "tag", TagHttp)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

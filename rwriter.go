@@ -27,7 +27,7 @@ func (w *ResponseWriter) Write(buf []byte) (int, error) {
 		// to the wire in case something fails. We'd rather just log it and send
 		// only the status to the client.
 		err := errors.New(string(buf))
-		slog.Error("http response error", err, "status", w.status)
+		slog.Error("http response error", err, "status", w.status, "tag", TagHttp)
 		return len(buf), nil
 	}
 	return w.w.Write(buf)
@@ -53,6 +53,7 @@ func LogResponse(w *ResponseWriter, r *http.Request) {
 	}
 	slog.Info(
 		"Sent response",
+		"tag", TagHttp,
 		"remote_addr", r.RemoteAddr,
 		"x_forwarded_for", xForwardedFor,
 		"method", r.Method,
