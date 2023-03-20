@@ -30,6 +30,7 @@ const (
   <title>{{.Title}}</title>
   <link>{{.Link}}</link>
   <description>{{.Desc}}</description>
+  <pubDate>{{timeRFC2822 .ModTime}}</pubDate>
   <enclosure url="{{.Enclosure.Url}}" length="{{.Enclosure.Length}}" Type="{{.Enclosure.Type}}" />
  </item>
  {{- end}}
@@ -37,6 +38,9 @@ const (
 </rss>
 `
 )
+
+// The date format required in a podcast RSS. See [2] in package documentation.
+const TimeRFC2822 = "Mon, Jan 02 2006 15:04:05 MST"
 
 type TemplateData struct {
 	Meta  Meta
@@ -161,7 +165,12 @@ func (m Meta) Items() ([]Item, error) {
 }
 
 func (m Meta) Feed(items []Item) ([]byte, error) {
-	tmpl := template.Must(template.New("rss").Parse(RSSTemplate))
+	ff := template.FuncMap{
+		"timeRFC2822": func(t *time.Time) string {
+			return t.Format(TimeRFC2822)
+		},
+	}
+	tmpl := template.Must(template.New("rss").Funcs(ff).Parse(RSSTemplate))
 	var buf bytes.Buffer
 	buf.Write([]byte(XMLHeader))
 	err := tmpl.Execute(&buf, TemplateData{m, items})
