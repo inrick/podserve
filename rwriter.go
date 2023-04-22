@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"golang.org/x/exp/slog"
 )
@@ -43,23 +44,21 @@ func LogResponse(w *ResponseWriter, r *http.Request) {
 	if uri == "" {
 		uri = r.URL.RequestURI()
 	}
-	contentLength := w.Header().Get("Content-Length")
-	if contentLength == "" {
-		contentLength = "-"
-	}
-	xForwardedFor := r.Header.Get("X-Forwarded-For")
-	if xForwardedFor == "" {
-		xForwardedFor = "-"
-	}
-	slog.Info(
-		"Sent response",
+	args := []any{
 		"tag", TagHttp,
 		"remote_addr", r.RemoteAddr,
-		"x_forwarded_for", xForwardedFor,
 		"method", r.Method,
 		"path", uri,
 		"proto", r.Proto,
 		"status", w.status,
-		"content_length", contentLength,
-	)
+	}
+	if contentLength := w.Header().Get("Content-Length"); contentLength != "" {
+		if length, err := strconv.ParseInt(contentLength, 10, 64); err == nil {
+			args = append(args, "content_length", length)
+		}
+	}
+	if xForwardedFor := r.Header.Get("X-Forwarded-For"); xForwardedFor != "" {
+		args = append(args, "x_forwarded_for", xForwardedFor)
+	}
+	slog.Info("Sent response", args...)
 }
