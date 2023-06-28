@@ -60,5 +60,8 @@ func LogResponse(w *ResponseWriter, r *http.Request) {
 	if xForwardedFor := r.Header.Get("X-Forwarded-For"); xForwardedFor != "" {
 		args = append(args, "x_forwarded_for", xForwardedFor)
 	}
+	if userAgent := r.UserAgent(); userAgent != "" {
+		args = append(args, "user_agent", userAgent)
+	}
 	slog.Info("Sent response", args...)
 }
