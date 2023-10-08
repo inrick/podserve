@@ -2,10 +2,9 @@ package main
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
-
-	"golang.org/x/exp/slog"
 )
 
 type ResponseWriter struct {

@@ -16,6 +16,7 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -24,8 +25,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"golang.org/x/exp/slog"
 )
 
 //go:embed cover.png
@@ -44,7 +43,7 @@ type Server struct {
 }
 
 func init() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 }
 
