@@ -20,11 +20,11 @@ const (
  xmlns:content="http://purl.org/rss/1.0/modules/content/"
 >
 <channel>
- <title>{{.Meta.Title}}</title>
- <link>{{.Meta.Link}}</link>
- <description>{{.Meta.Desc}}</description>
- <language>{{.Meta.Language}}</language>
- <itunes:image href="{{.Meta.CoverUrl}}" />
+ <title>{{.Metadata.Title}}</title>
+ <link>{{.Metadata.Link}}</link>
+ <description>{{.Metadata.Desc}}</description>
+ <language>{{.Metadata.Language}}</language>
+ <itunes:image href="{{.Metadata.CoverUrl}}" />
  {{range .Items}}
  <item>
   <title>{{.Title}}</title>
@@ -43,11 +43,11 @@ const (
 const TimeRFC2822 = "Mon, Jan 02 2006 15:04:05 MST"
 
 type TemplateData struct {
-	Meta  Meta
-	Items []Item
+	Metadata Metadata
+	Items    []Item
 }
 
-type Meta struct {
+type Metadata struct {
 	Title    string
 	Link     string
 	Desc     string
@@ -73,7 +73,7 @@ type Enclosure struct {
 	Type   string
 }
 
-type File struct {
+type FileInfo struct {
 	Path     string
 	MimeType string
 	Size     int64
@@ -92,7 +92,7 @@ var mimeType = map[string]string{
 	".m4a": "audio/x-m4a",
 }
 
-func (m Meta) GenerateFeed() (feedXml []byte, files map[string]File, err error) {
+func (m Metadata) GenerateFeed() (feedXml []byte, files map[string]FileInfo, err error) {
 	items, err := m.Items()
 	if err != nil {
 		return nil, nil, err
@@ -101,9 +101,9 @@ func (m Meta) GenerateFeed() (feedXml []byte, files map[string]File, err error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	files = make(map[string]File)
+	files = make(map[string]FileInfo)
 	for _, it := range items {
-		files[it.Path] = File{
+		files[it.Path] = FileInfo{
 			Path:     filepath.Join(m.localRoot, it.Path),
 			MimeType: it.Enclosure.Type,
 			Size:     it.Enclosure.Length,
@@ -115,7 +115,7 @@ func (m Meta) GenerateFeed() (feedXml []byte, files map[string]File, err error) 
 
 // Reads the local file system and returns a slice of available Items
 // with all the metadata required to serve them.
-func (m Meta) Items() ([]Item, error) {
+func (m Metadata) Items() ([]Item, error) {
 	if m.externalUrl[len(m.externalUrl)-1] != '/' {
 		panic("Meta.Items: expected externalUrl to end in '/'")
 	}
@@ -164,7 +164,7 @@ func (m Meta) Items() ([]Item, error) {
 	return pp, err
 }
 
-func (m Meta) Feed(items []Item) ([]byte, error) {
+func (m Metadata) Feed(items []Item) ([]byte, error) {
 	ff := template.FuncMap{
 		"timeRFC2822": func(t *time.Time) string {
 			return t.Format(TimeRFC2822)

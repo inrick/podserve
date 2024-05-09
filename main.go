@@ -36,10 +36,10 @@ const (
 )
 
 type Server struct {
-	mu      sync.RWMutex // Guards FeedXML and Files
-	Meta    Meta
-	FeedXML []byte
-	Files   map[string]File // Path -> File, if it exists.
+	mu       sync.RWMutex // Guards FeedXML and Files
+	Metadata Metadata
+	FeedXML  []byte
+	Files    map[string]FileInfo // Path -> File, if it exists.
 }
 
 func init() {
@@ -63,60 +63,66 @@ func main() {
 }
 
 func run() error {
-	var port int
-	var dir, externalUrl, title, desc, language string
-	flag.IntVar(&port, "port", 8080, "port on which to serve content")
-	flag.StringVar(&dir, "dir", ".", "directory with media files to serve")
+	var cfg struct {
+		port        int
+		dir         string
+		externalUrl string
+		title       string
+		desc        string
+		language    string
+	}
+	flag.IntVar(&cfg.port, "port", 8080, "port on which to serve content")
+	flag.StringVar(&cfg.dir, "dir", ".", "directory with media files to serve")
 	flag.StringVar(
-		&externalUrl,
+		&cfg.externalUrl,
 		"externalUrl",
 		"",
 		"external URL to prefix all podcast entries with, "+
 			"have to include protocol (http/https) and "+
 			"should preferably be an externally reachable url",
 	)
-	flag.StringVar(&title, "title", "My Podcast", "podcast title")
-	flag.StringVar(&desc, "desc", "Whatever", "podcast description")
+	flag.StringVar(&cfg.title, "title", "My Podcast", "podcast title")
+	flag.StringVar(&cfg.desc, "desc", "Whatever", "podcast description")
 	flag.StringVar(
-		&language,
+		&cfg.language,
 		"lang", "en", "ISO-639 language code of the show's spoken language",
 	)
 	flag.Parse()
 
-	if externalUrl == "" {
+	if cfg.externalUrl == "" {
 		addrs := GetIpAddrs()
-		externalUrl = fmt.Sprintf("http://%s:%d/", addrs[0], port)
+		cfg.externalUrl = fmt.Sprintf("http://%s:%d/", addrs[0], cfg.port)
 		slog.Warn(
-			fmt.Sprintf("-externalUrl left unspecified, using %s", externalUrl),
+			fmt.Sprintf("-externalUrl left unspecified, using %s", cfg.externalUrl),
 			"tag", TagStart,
-			"url", externalUrl,
+			"url", cfg.externalUrl,
 		)
 	}
 
-	if externalUrl[len(externalUrl)-1] != '/' {
-		externalUrl += "/"
+	if cfg.externalUrl[len(cfg.externalUrl)-1] != '/' {
+		cfg.externalUrl += "/"
 	}
 
-	srv, err := NewServer(Meta{
-		Title:    title,
-		Link:     externalUrl + "feed",
-		Desc:     desc,
+	srv, err := NewServer(Metadata{
+		Title:    cfg.title,
+		Link:     cfg.externalUrl + "feed",
+		Desc:     cfg.desc,
 		Language: "en",
-		CoverUrl: externalUrl + CoverPath[1:],
+		CoverUrl: cfg.externalUrl + CoverPath[1:],
 
-		externalUrl: externalUrl,
-		localRoot:   dir,
+		externalUrl: cfg.externalUrl,
+		localRoot:   cfg.dir,
 	})
 	if err != nil {
 		return err
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/", srv)
-	mux.HandleFunc(FeedPath, srv.ServeFeed)
-	mux.HandleFunc(CoverPath, srv.ServeCover)
+	mux.Handle("/", responseLogger(srv))
+	mux.Handle(FeedPath, responseLoggerFunc(srv.ServeFeed))
+	mux.Handle(CoverPath, responseLoggerFunc(srv.ServeCover))
 	s := &http.Server{
-		Addr:           fmt.Sprintf(":%d", port),
+		Addr:           fmt.Sprintf(":%d", cfg.port),
 		Handler:        mux,
 		ReadTimeout:    120 * time.Second,
 		IdleTimeout:    120 * time.Second,
@@ -124,34 +130,45 @@ func run() error {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go refreshEntries(ctx, done, srv)
-
 	// Enable graceful shutdown.
-	shutdown := make(chan struct{})
+	var wg sync.WaitGroup
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		<-sig
+		slog.Info("Received signal to shutdown.")
 		cancel()
-		if err := s.Shutdown(context.Background()); err != nil {
-			slog.Error("error shutting down http server", err, "tag", TagService)
-		}
-		<-done
-		close(shutdown)
 	}()
 
-	fullUrl := externalUrl + FeedPath[1:]
+	wg.Add(1)
+	go refreshEntries(ctx, &wg, srv)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		slog.Info("Shutting down http server", "tag", TagService)
+		tctx, tcancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer tcancel()
+		if err := s.Shutdown(tctx); err != nil {
+			slog.Error("Error shutting down http server.", err, "tag", TagService)
+		}
+	}()
+
+	fullUrl := cfg.externalUrl + FeedPath[1:]
 	initMsg := fmt.Sprintf(
 		"Finished initialization, serving %d files. Add %s to your podcast app. Listening on port %d.",
-		len(srv.Files), fullUrl, port,
+		len(srv.Files), fullUrl, cfg.port,
 	)
-	slog.Info(initMsg, "tag", TagStart, "num_files", len(srv.Files), "url", fullUrl, "port", port)
+	slog.Info(initMsg, "tag", TagStart, "num_files", len(srv.Files), "url", fullUrl, "port", cfg.port)
 	if err := s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
-	<-shutdown
+	wg.Wait()
 	return nil
 }
 
@@ -177,30 +194,30 @@ func GetIpAddrs() []string {
 	return ips
 }
 
-func NewServer(m Meta) (*Server, error) {
+func NewServer(m Metadata) (*Server, error) {
 	feedXml, files, err := m.GenerateFeed()
 	if err != nil {
 		return nil, err
 	}
 	srv := Server{
-		mu:      sync.RWMutex{},
-		Meta:    m,
-		FeedXML: feedXml,
-		Files:   files,
+		mu:       sync.RWMutex{},
+		Metadata: m,
+		FeedXML:  feedXml,
+		Files:    files,
 	}
 	return &srv, nil
 }
 
-func refreshEntries(ctx context.Context, done chan<- struct{}, s *Server) {
+func refreshEntries(ctx context.Context, wg *sync.WaitGroup, s *Server) {
+	defer wg.Done()
 	for {
 		select {
 		case <-time.After(60 * time.Second):
 		case <-ctx.Done():
-			done <- struct{}{}
 			return
 		}
 
-		feedXml, files, err := s.Meta.GenerateFeed()
+		feedXml, files, err := s.Metadata.GenerateFeed()
 		if err != nil {
 			slog.Error("refreshEntries: could not generate podcast items", err, "tag", TagRefresh)
 			continue
@@ -222,11 +239,21 @@ func refreshEntries(ctx context.Context, done chan<- struct{}, s *Server) {
 	}
 }
 
+func responseLoggerFunc(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
+	return responseLogger(http.HandlerFunc(f))
+}
+
+func responseLogger(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w = NewResponseWriter(w)
+		defer LogResponse(w.(*ResponseWriter), r)
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w = NewResponseWriter(w)
-	defer LogResponse(w.(*ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	s.mu.RLock()
@@ -257,10 +284,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeFeed(w http.ResponseWriter, r *http.Request) {
-	w = NewResponseWriter(w)
-	defer LogResponse(w.(*ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	s.mu.RLock()
@@ -273,10 +298,8 @@ func (s *Server) ServeFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeCover(w http.ResponseWriter, r *http.Request) {
-	w = NewResponseWriter(w)
-	defer LogResponse(w.(*ResponseWriter), r)
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 	w.Header().Add("Content-Type", "image/png")
