@@ -155,7 +155,7 @@ func run() error {
 		tctx, tcancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer tcancel()
 		if err := s.Shutdown(tctx); err != nil {
-			slog.Error("Error shutting down http server.", err, "tag", TagService)
+			slog.Error("Error shutting down http server.", "error", err, "tag", TagService)
 		}
 	}()
 
@@ -176,11 +176,11 @@ func GetIpAddrs() []string {
 	var ips []string
 	host, err := os.Hostname()
 	if err != nil {
-		slog.Error("Could not get hostname", err, "tag", TagService)
+		slog.Error("Could not get hostname", "error", err, "tag", TagService)
 	}
 	addrs, err := net.LookupIP(host)
 	if err != nil {
-		slog.Error("Could not lookup IP", err, "tag", TagService)
+		slog.Error("Could not lookup IP", "error", err, "tag", TagService)
 	}
 	for _, addr := range addrs {
 		if ip := addr.To4(); ip != nil {
@@ -219,7 +219,7 @@ func refreshEntries(ctx context.Context, wg *sync.WaitGroup, s *Server) {
 
 		feedXml, files, err := s.Metadata.GenerateFeed()
 		if err != nil {
-			slog.Error("refreshEntries: could not generate podcast items", err, "tag", TagRefresh)
+			slog.Error("refreshEntries: could not generate podcast items", "error", err, "tag", TagRefresh)
 			continue
 		}
 
@@ -237,18 +237,6 @@ func refreshEntries(ctx context.Context, wg *sync.WaitGroup, s *Server) {
 		)
 		s.mu.Unlock()
 	}
-}
-
-func responseLoggerFunc(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
-	return responseLogger(http.HandlerFunc(f))
-}
-
-func responseLogger(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w = NewResponseWriter(w)
-		defer LogResponse(w.(*ResponseWriter), r)
-		h.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +257,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fp, err := os.Open(pf.Path)
 	if err != nil {
-		slog.Error("could not open file", err, "file", requestedFile, "tag", TagHttp)
+		slog.Error("could not open file", "error", err, "file", requestedFile, "tag", TagHttp)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

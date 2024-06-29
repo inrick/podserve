@@ -7,6 +7,18 @@ import (
 	"strconv"
 )
 
+func responseLoggerFunc(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
+	return responseLogger(http.HandlerFunc(f))
+}
+
+func responseLogger(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w = NewResponseWriter(w)
+		defer LogResponse(w.(*ResponseWriter), r)
+		h.ServeHTTP(w, r)
+	})
+}
+
 type ResponseWriter struct {
 	w      http.ResponseWriter
 	status int
@@ -27,7 +39,7 @@ func (w *ResponseWriter) Write(buf []byte) (int, error) {
 		// to the wire in case something fails. We'd rather just log it and send
 		// only the status to the client.
 		err := errors.New(string(buf))
-		slog.Error("http response error", err, "status", w.status, "tag", TagHttp)
+		slog.Error("http response error", "error", err, "status", w.status, "tag", TagHttp)
 		return len(buf), nil
 	}
 	return w.w.Write(buf)
