@@ -132,16 +132,11 @@ func (m Metadata) Items() ([]Item, error) {
 		ext := filepath.Ext(name)
 
 		if mime, ok := mimeType[ext]; ok {
-			f, err := os.Open(filepath.Join(m.localRoot, path))
+			info, err := os.Stat(filepath.Join(m.localRoot, path))
 			if err != nil {
 				return err
 			}
-			defer f.Close()
 			title := name[:len(name)-len(ext)]
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
 			url, err := url.Parse(m.externalUrl + url.PathEscape(path))
 			if err != nil {
 				return err
