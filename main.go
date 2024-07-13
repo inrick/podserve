@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,11 +43,6 @@ type Server struct {
 	Files    map[string]FileInfo // Path -> File, if it exists.
 }
 
-func init() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
-}
-
 // Different tags used to group log messages.
 const (
 	TagService = "service"
@@ -57,7 +53,7 @@ const (
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("main", err, "tag", TagService)
+		slog.Error("main", "error", err, "tag", TagService)
 		os.Exit(1)
 	}
 }
@@ -65,6 +61,7 @@ func main() {
 func run() error {
 	var cfg struct {
 		port        int
+		logFormat   string
 		dir         string
 		externalUrl string
 		title       string
@@ -72,6 +69,7 @@ func run() error {
 		language    string
 	}
 	flag.IntVar(&cfg.port, "port", 8080, "port on which to serve content")
+	flag.StringVar(&cfg.logFormat, "logFormat", "text", "log format (json/text)")
 	flag.StringVar(&cfg.dir, "dir", ".", "directory with media files to serve")
 	flag.StringVar(
 		&cfg.externalUrl,
@@ -88,6 +86,19 @@ func run() error {
 		"lang", "en", "ISO-639 language code of the show's spoken language",
 	)
 	flag.Parse()
+
+	switch format := strings.ToLower(cfg.logFormat); format {
+	case "json":
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	case "text":
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+	default:
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+		return fmt.Errorf(
+			"unknown log handler %q: allowed values are \"json\" or \"text\"",
+			format,
+		)
+	}
 
 	if cfg.externalUrl == "" {
 		addrs := GetIpAddrs()
