@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+  <title>{{ .Metadata.Title }}</title>
+  <link rel="stylesheet" href="{{ .Metadata.StylesheetUrl }}">
+  <body>
+    <div class="m-4">
+      <h1>{{ .Metadata.Title }}</h1>
+      <table>
+        <thead>
+          <tr class="text-left">
+            <th scope="row">Title</td>
+            <th scope="row" class="text-right">Size</td>
+            <th scope="row">Modified at</td>
+            <th scope="row">Type</td>
+            <th scope="row">Preview</td>
+          </tr>
+        </thead>
+        <tbody>
+          {{- range .Items }}
+          <tr>
+            <td class="align-middle"><a href="{{ .Link }}">{{ .Title }}</a></td>
+            <td class="align-middle text-right whitespace-nowrap font-mono text-sm">{{ readableBytes .Enclosure.Length }}</td>
+            <td class="align-middle text-right font-mono text-sm">{{ formatTime .ModTime }}</td>
+            <td class="align-middle font-mono text-sm">{{ .Enclosure.Type }}</td>
+            <td class="align-middle"><audio controls preload="none"><source src="{{ .Link }}"></audio></td>
+          </tr>
+          {{- end }}
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>

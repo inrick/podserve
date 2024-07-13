@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -48,11 +49,12 @@ type TemplateData struct {
 }
 
 type Metadata struct {
-	Title    string
-	Link     string
-	Desc     string
-	Language string
-	CoverUrl string
+	Title         string
+	Link          string
+	Desc          string
+	Language      string
+	CoverUrl      string
+	StylesheetUrl string
 
 	externalUrl string
 	localRoot   string
@@ -92,16 +94,16 @@ var mimeType = map[string]string{
 	".m4a": "audio/x-m4a",
 }
 
-func (m Metadata) GenerateFeed() (feedXml []byte, files map[string]FileInfo, err error) {
+func GenerateFeed(m Metadata) ([]byte, map[string]FileInfo, []Item, error) {
 	items, err := m.Items()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	feedXml, err = m.Feed(items)
+	feedXml, err := m.Feed(items)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	files = make(map[string]FileInfo)
+	files := make(map[string]FileInfo)
 	for _, it := range items {
 		files[it.Path] = FileInfo{
 			Path:     filepath.Join(m.localRoot, it.Path),
@@ -110,7 +112,13 @@ func (m Metadata) GenerateFeed() (feedXml []byte, files map[string]FileInfo, err
 			ModTime:  it.ModTime,
 		}
 	}
-	return feedXml, files, nil
+	slices.SortFunc(items, func(a, b Item) int {
+		if b.ModTime.Before(a.ModTime) {
+			return -1
+		}
+		return 1
+	})
+	return feedXml, files, items, nil
 }
 
 // Reads the local file system and returns a slice of available Items

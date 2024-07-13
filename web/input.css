@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+a {
+  @apply text-green-800 hover:underline hover:decoration-solid;
+}
+
+audio {
+  width: 300px;
+  height: 28px;
+}
+
+.btn {
+  @apply px-2 space-x-4 rounded-sm relative inline-block border border-solid border-black text-black no-underline hover:bg-black hover:text-white hover:no-underline whitespace-nowrap;
+   box-shadow: 2px 2px #ccc;
+}
+
+table {
+  @apply mb-4 border border-solid border-zinc-900;
+  box-shadow: 4px 4px 3px #ddd;
+}
+
+thead {
+  @apply bg-zinc-200 p-2;
+}
+
+th, td {
+  @apply px-2 align-top;
+}
+
+tr.htmx-swapping td {
+  opacity: 0;
+  transition: opacity .5s ease-out;
+}
+
+tbody tr {
+  @apply odd:bg-white even:bg-slate-100;
+}
+
+h1 {
+  @apply font-bold text-xl;
+}
+
+h3 {
+  @apply font-bold text-lg;
+}

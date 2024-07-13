@@ -13,14 +13,18 @@ package main // import "podserve"
 import (
 	"bytes"
 	"context"
+	"embed"
 	_ "embed"
 	"flag"
 	"fmt"
+	"html/template"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,19 +32,27 @@ import (
 	"time"
 )
 
-//go:embed cover.png
-var cover []byte
+//go:embed static/*
+var static embed.FS
+
+//go:embed templates/*
+var templateFS embed.FS
 
 const (
-	FeedPath  = "/feed"
-	CoverPath = "/cover.png"
+	FeedPath     = "/feed"
+	FeedHtmlPath = "/feed.html"
+	StaticPath   = "/static/"
 )
 
 type Server struct {
-	mu       sync.RWMutex // Guards FeedXML and Files
 	Metadata Metadata
-	FeedXML  []byte
-	Files    map[string]FileInfo // Path -> File, if it exists.
+
+	mu      sync.RWMutex // Guards FeedXML, Files and SortedFiles
+	FeedXML []byte
+	Files   map[string]FileInfo // Path -> File, if it exists.
+	Items   []Item
+
+	HtmlTemplate *template.Template
 }
 
 // Different tags used to group log messages.
@@ -115,11 +127,12 @@ func run() error {
 	}
 
 	srv, err := NewServer(Metadata{
-		Title:    cfg.title,
-		Link:     cfg.externalUrl + "feed",
-		Desc:     cfg.desc,
-		Language: "en",
-		CoverUrl: cfg.externalUrl + CoverPath[1:],
+		Title:         cfg.title,
+		Link:          cfg.externalUrl + "feed",
+		Desc:          cfg.desc,
+		Language:      "en",
+		CoverUrl:      cfg.externalUrl + path.Join("static", "cover.png"),
+		StylesheetUrl: cfg.externalUrl + path.Join("static", "style.css"),
 
 		externalUrl: cfg.externalUrl,
 		localRoot:   cfg.dir,
@@ -131,7 +144,8 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/", responseLogger(srv))
 	mux.Handle(FeedPath, responseLoggerFunc(srv.ServeFeed))
-	mux.Handle(CoverPath, responseLoggerFunc(srv.ServeCover))
+	mux.Handle(FeedHtmlPath, responseLoggerFunc(srv.ServeFeedHtml))
+	mux.Handle(StaticPath, responseLogger(http.FileServer(http.FS(static))))
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", cfg.port),
 		Handler:        mux,
@@ -171,11 +185,12 @@ func run() error {
 	}()
 
 	fullUrl := cfg.externalUrl + FeedPath[1:]
+	fullUrlHtml := cfg.externalUrl + FeedHtmlPath[1:]
 	initMsg := fmt.Sprintf(
-		"Finished initialization, serving %d files. Add %s to your podcast app. Listening on port %d.",
-		len(srv.Files), fullUrl, cfg.port,
+		"Finished initialization, serving %d files. Add %s to your podcast app or view %s in a web browser. Listening on port %d.",
+		len(srv.Files), fullUrl, fullUrlHtml, cfg.port,
 	)
-	slog.Info(initMsg, "tag", TagStart, "num_files", len(srv.Files), "url", fullUrl, "port", cfg.port)
+	slog.Info(initMsg, "tag", TagStart, "num_files", len(srv.Files), "url", fullUrl, "url_html", fullUrlHtml, "port", cfg.port)
 	if err := s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
@@ -206,15 +221,28 @@ func GetIpAddrs() []string {
 }
 
 func NewServer(m Metadata) (*Server, error) {
-	feedXml, files, err := m.GenerateFeed()
+	feedXml, files, items, err := GenerateFeed(m)
 	if err != nil {
 		return nil, err
 	}
+	tmpl := template.Must(
+		template.New("feed.html").
+			Funcs(template.FuncMap{
+				"formatTime":        formatTime,
+				"readableBytes":     readableBytes,
+				"resolveStaticPath": resolveStaticPath(m.externalUrl),
+			}).
+			ParseFS(templateFS, "*/feed.html"),
+	)
 	srv := Server{
-		mu:       sync.RWMutex{},
 		Metadata: m,
-		FeedXML:  feedXml,
-		Files:    files,
+
+		mu:      sync.RWMutex{},
+		FeedXML: feedXml,
+		Files:   files,
+		Items:   items,
+
+		HtmlTemplate: tmpl,
 	}
 	return &srv, nil
 }
@@ -228,7 +256,7 @@ func refreshEntries(ctx context.Context, wg *sync.WaitGroup, s *Server) {
 			return
 		}
 
-		feedXml, files, err := s.Metadata.GenerateFeed()
+		feedXml, files, items, err := GenerateFeed(s.Metadata)
 		if err != nil {
 			slog.Error("refreshEntries: could not generate podcast items", "error", err, "tag", TagRefresh)
 			continue
@@ -241,6 +269,7 @@ func refreshEntries(ctx context.Context, wg *sync.WaitGroup, s *Server) {
 		s.mu.Lock()
 		s.FeedXML = feedXml
 		s.Files = files
+		s.Items = items
 		slog.Info(
 			fmt.Sprintf("Updated podcast, now serving %d files.", len(s.Files)),
 			"tag", TagRefresh,
@@ -296,12 +325,55 @@ func (s *Server) ServeFeed(w http.ResponseWriter, r *http.Request) {
 	w.Write(s.FeedXML)
 }
 
-func (s *Server) ServeCover(w http.ResponseWriter, r *http.Request) {
+var units = []struct {
+	unit     string
+	decimals int
+}{
+	{"B", 0},
+	{"KB", 0},
+	{"MB", 2},
+	{"GB", 3},
+	{"TB", 3},
+}
+
+func formatTime(t time.Time) string {
+	return t.Format(time.DateTime)
+}
+
+func readableBytes(n int64) string {
+	nf := float64(n)
+	i := 0
+	for ; i+1 < len(units) && 1024 <= nf; i++ {
+		nf /= 1024
+	}
+	u := units[i]
+	return fmt.Sprintf(fmt.Sprintf("%%.%df %s", u.decimals, u.unit), nf)
+}
+
+func resolveStaticPath(externalUrl string) func(string) string {
+	return func(filename string) string {
+		url, err := url.Parse(path.Join(externalUrl, url.PathEscape(filename)))
+		if err != nil {
+			panic(err)
+		}
+		return url.String()
+	}
+}
+
+func (s *Server) ServeFeedHtml(w http.ResponseWriter, r *http.Request) {
 	if !(r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Add("Content-Type", "image/png")
-	w.Header().Add("Content-Length", strconv.Itoa(len(cover)))
-	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(cover))
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	err := s.HtmlTemplate.Execute(w, TemplateData{
+		Metadata: s.Metadata,
+		Items:    s.Items,
+	})
+	if err != nil {
+		slog.Error("template error", "error", err)
+		return
+	}
 }
