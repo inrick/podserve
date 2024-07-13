@@ -20,16 +20,16 @@ func responseLogger(h http.Handler) http.Handler {
 }
 
 type ResponseWriter struct {
-	w      http.ResponseWriter
+	http.ResponseWriter
 	status int
 }
 
 func NewResponseWriter(w http.ResponseWriter) *ResponseWriter {
-	return &ResponseWriter{w: w, status: 200}
+	return &ResponseWriter{ResponseWriter: w, status: 200}
 }
 
 func (w *ResponseWriter) Header() http.Header {
-	return w.w.Header()
+	return w.ResponseWriter.Header()
 }
 
 func (w *ResponseWriter) Write(buf []byte) (int, error) {
@@ -42,12 +42,12 @@ func (w *ResponseWriter) Write(buf []byte) (int, error) {
 		slog.Error("http response error", "error", err, "status", w.status, "tag", TagHttp)
 		return len(buf), nil
 	}
-	return w.w.Write(buf)
+	return w.ResponseWriter.Write(buf)
 }
 
 func (w *ResponseWriter) WriteHeader(status int) {
 	w.status = status
-	w.w.WriteHeader(status)
+	w.ResponseWriter.WriteHeader(status)
 }
 
 func LogResponse(w *ResponseWriter, r *http.Request) {
