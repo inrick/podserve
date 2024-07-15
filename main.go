@@ -142,13 +142,13 @@ func run() error {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/", responseLogger(srv))
-	mux.Handle(FeedPath, responseLoggerFunc(srv.ServeFeed))
-	mux.Handle(FeedHtmlPath, responseLoggerFunc(srv.ServeFeedHtml))
-	mux.Handle(StaticPath, responseLogger(http.FileServer(http.FS(static))))
+	mux.Handle("/", srv)
+	mux.HandleFunc(FeedPath, srv.ServeFeed)
+	mux.HandleFunc(FeedHtmlPath, srv.ServeFeedHtml)
+	mux.Handle(StaticPath, http.FileServer(http.FS(static)))
 	s := &http.Server{
 		Addr:           fmt.Sprintf(":%d", cfg.port),
-		Handler:        mux,
+		Handler:        responseLogger(mux),
 		ReadTimeout:    120 * time.Second,
 		IdleTimeout:    120 * time.Second,
 		WriteTimeout:   120 * time.Second,

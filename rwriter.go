@@ -7,10 +7,6 @@ import (
 	"strconv"
 )
 
-func responseLoggerFunc(f func(w http.ResponseWriter, r *http.Request)) http.Handler {
-	return responseLogger(http.HandlerFunc(f))
-}
-
 func responseLogger(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w = NewResponseWriter(w)
