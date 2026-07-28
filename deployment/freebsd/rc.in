@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# PROVIDE: podserve
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="podserve"
+rcvar="podserve_enable"
+
+load_rc_config "$name"
+
+: ${podserve_enable:="NO"}
+: ${podserve_args:=""}
+: ${podserve_user:="podserve"}
+: ${podserve_group:="podserve"}
+: ${podserve_bin:="@@PREFIX@@/bin/podserve"}
+
+podserve_logfile="@@LOGFILE@@"
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+
+command_args="-o ${podserve_logfile} -H -P ${pidfile} -r -- ${podserve_bin} ${podserve_args}"
+
+start_precmd="podserve_start_precmd"
+podserve_start_precmd()
+{
+  if [ ! -e "${pidfile}" ]; then
+    install -m 644 -o "${podserve_user}" -g "${podserve_group}" /dev/null "${pidfile}"
+  fi
+  if [ ! -e "${podserve_logfile}" ]; then
+    install -m 644 -o "${podserve_user}" -g "${podserve_group}" /dev/null "${podserve_logfile}"
+  fi
+}
+
+run_rc_command "$1"
